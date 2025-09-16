@@ -67,6 +67,10 @@ function Home() {
   const feedRef = useRef<HTMLDivElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const [currentScrollIndex, setCurrentScrollIndex] = useState(0);
+  const [currentDiscussion, setCurrentDiscussion] = useState<Discussion | null>(
+    null
+  );
 
   useEffect(() => {
     const ws = new WebSocket("ws://localhost:3000");
@@ -96,12 +100,36 @@ function Home() {
   // Handle mouse movement to show timestamps
   // Just track mouse position, don't set hoverTimestamp
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      setHoverPosition({ x: e.clientX, y: e.clientY });
+    const handleScroll = () => {
+      if (!feedRef.current || !discussions.length) return;
+
+      const feed = feedRef.current;
+      const scrollTop = feed.scrollTop;
+      const scrollHeight = feed.scrollHeight - feed.clientHeight;
+
+      if (scrollHeight <= 0) return;
+
+      const scrollRatio = Math.max(0, Math.min(1, scrollTop / scrollHeight));
+      const newIndex = Math.min(
+        discussions.length - 1,
+        Math.floor(scrollRatio * discussions.length)
+      );
+
+      setCurrentScrollIndex(newIndex);
+      setCurrentDiscussion(discussions[newIndex]);
     };
-    document.addEventListener("mousemove", handleMouseMove);
-    return () => document.removeEventListener("mousemove", handleMouseMove);
-  }, []);
+
+    const feed = feedRef.current;
+    if (feed) {
+      feed.addEventListener("scroll", handleScroll, { passive: true });
+      // Initial calculation
+      if (discussions.length > 0) {
+        setCurrentDiscussion(discussions[0]);
+      }
+
+      return () => feed.removeEventListener("scroll", handleScroll);
+    }
+  }, [discussions, discussions.length]);
 
   const user: User | null = activeAccount
     ? {
@@ -187,7 +215,7 @@ function Home() {
       </div>
 
       {/* Hover timestamp indicator */}
-      {hoverTimestamp && (
+      {/* {hoverTimestamp && (
         <div
           className="fixed z-50 px-4 py-2.5 text-xs rounded-xl bg-slate-900/90 dark:bg-slate-100/90 text-white dark:text-slate-900 pointer-events-none shadow-2xl backdrop-blur-sm border border-cyan-500/30"
           style={{ left: hoverPosition.x + 15, top: hoverPosition.y - 15 }}
@@ -197,7 +225,7 @@ function Home() {
             {hoverTimestamp}
           </div>
         </div>
-      )}
+      )} */}
 
       {/* Futuristic Navigation */}
       <nav className="relative bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200/50 dark:border-slate-700/50 shadow-xl">
@@ -562,29 +590,8 @@ function Home() {
                 className="relative w-6 cursor-pointer"
                 ref={timelineRef}
                 style={{ height: "500px" }} // Fixed height
-                onMouseMove={(e) => {
-                  if (!discussions.length) return;
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const y = e.clientY - rect.top;
-                  const ratio = Math.max(0, Math.min(1, y / rect.height));
-                  const idx = Math.min(
-                    discussions.length - 1,
-                    Math.floor(ratio * discussions.length)
-                  );
-                  const post = discussions[idx];
-                  if (post) {
-                    setHoverTimestamp(
-                      new Date(post.createdAt).toLocaleString()
-                    );
-                    setHoverPosition({
-                      x: rect.right + 10, // Position to the right of timeline
-                      y: e.clientY,
-                    });
-                  }
-                }}
-                onMouseLeave={() => setHoverTimestamp(null)}
                 onClick={(e) => {
-                  if (!discussions.length) return;
+                  if (!discussions.length || !feedRef.current) return;
                   const rect = e.currentTarget.getBoundingClientRect();
                   const y = e.clientY - rect.top;
                   const ratio = Math.max(0, Math.min(1, y / rect.height));
@@ -592,19 +599,56 @@ function Home() {
                     discussions.length - 1,
                     Math.floor(ratio * discussions.length)
                   );
-                  const post = discussions[idx];
 
-                  if (post) {
-                    const element = document.getElementById(`post-${post.id}`);
-                    element?.scrollIntoView({
-                      behavior: "smooth",
-                      block: "center",
-                    });
-                  }
+                  // Update the current scroll index
+                  setCurrentScrollIndex(idx);
+
+                  // Calculate the scroll position for the messages container
+                  const feed = feedRef.current;
+                  const scrollHeight = feed.scrollHeight - feed.clientHeight;
+                  const scrollPosition =
+                    (idx / (discussions.length - 1)) * scrollHeight;
+
+                  // Scroll to the position
+                  feed.scrollTo({
+                    top: scrollPosition,
+                    behavior: "smooth",
+                  });
                 }}
               >
-                {/* Vertical Line */}
-                <div className="absolute left-1/2 transform -translate-x-1/2 w-1 bg-slate-400 dark:bg-slate-500 h-full rounded-full"></div>
+                {/* Vertical Line Background */}
+                <div className="absolute left-1/2 transform -translate-x-1/2 w-1 bg-slate-300 dark:bg-slate-600 h-full rounded-full"></div>
+
+                {/* Current Position Indicator with Text */}
+                {discussions.length > 0 && currentDiscussion && (
+                  <div
+                    className="absolute left-1/2 transform -translate-x-1/2 transition-all duration-300 flex flex-col items-center hover:cursor-ns-resize"
+                    style={{
+                      top: `calc(${
+                        (currentScrollIndex / (discussions.length - 1)) * 100
+                      }% - ${Math.max(8, 500 / discussions.length) / 2}px)`,
+                    }}
+                  >
+                    {/* Thick indicator */}
+                    <div
+                      className="w-3 bg-cyan-500 dark:bg-cyan-400 rounded-full hover:cursor-ns-resize"
+                      style={{
+                        height: `${Math.max(8, 500 / discussions.length)}px`,
+                      }}
+                    ></div>
+
+                    {/* Position Indicator Text with Month and Year - moves with the indicator */}
+                    <div className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap bg-white/80 dark:bg-slate-800/80 px-1.5 py-0.5 rounded-md border border-slate-200/50 dark:border-slate-700/50 hover:cursor-ns-resize">
+                      {new Date(currentDiscussion.createdAt)
+                        .toLocaleString("default", { month: "short" })
+                        .toUpperCase()}{" "}
+                      {new Date(currentDiscussion.createdAt).getFullYear()}
+                      <div className="text-center mt-0.5">
+                        {currentScrollIndex + 1} / {discussions.length}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Subtle hover effect */}
                 <div className="absolute inset-0 opacity-0 hover:opacity-100 transition-opacity duration-200">
@@ -614,7 +658,7 @@ function Home() {
             </div>
 
             {/* Sidebar - Positioned next to timeline */}
-            <div className="relative">
+            <div className="relative ml-5">
               {/* Sidebar Toggle */}
               {!sidebarOpen && (
                 <button
@@ -967,7 +1011,7 @@ function Home() {
             </div>
 
             {/* Floating Tooltip */}
-            {hoverTimestamp && (
+            {/* {hoverTimestamp && (
               <div
                 className="fixed bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs font-medium px-3 py-2 rounded-lg shadow-xl pointer-events-none z-50 border border-slate-700 dark:border-slate-300"
                 style={{
@@ -981,7 +1025,7 @@ function Home() {
                   Click to jump to post
                 </div>
               </div>
-            )}
+            )} */}
           </div>
         </div>
       </main>
