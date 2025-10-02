@@ -14,10 +14,10 @@ import {
   Moon,
   Plus,
   MessageSquare,
-  ThumbsUp,
-  Share,
-  MoreHorizontal,
-  Calendar,
+  // ThumbsUp,
+  // Share,
+  // MoreHorizontal,
+  // Calendar,
   ChevronDown,
   Eye,
   Tag,
@@ -25,13 +25,13 @@ import {
   TrendingUp,
   Zap,
   Globe,
-  Filter,
+  // Filter,
   BarChart3,
   Activity,
   ChevronRight,
   ChevronLeft,
 } from "lucide-react";
-
+import io from "socket.io-client";
 import { useEffect, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import type { User, Discussion } from "../types";
@@ -39,6 +39,8 @@ import CreateDiscussion from "../components/CreateDiscussion";
 import DiscussionFeed from "../components/DiscussionFeed";
 import { uploadFileToPinata, uploadMetadataToIPFS } from "../services/pinata";
 import useDiscussions from "../contexts/useDiscussions";
+
+const socket = io("http://localhost:3000");
 
 function Home() {
   type PinataResp = { IpfsHash?: string; ipfsHash?: string };
@@ -60,10 +62,9 @@ function Home() {
   const discussionLoading = false;
 
   const [showCreateDiscussion, setShowCreateDiscussion] = useState(false);
-  const [hoverTimestamp, setHoverTimestamp] = useState<string | null>(null);
-  const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
+  // const [hoverTimestamp, setHoverTimestamp] = useState<string | null>(null);
+  // const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
   const [activeCategory, setActiveCategory] = useState("all");
-  const wsRef = useRef<WebSocket | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -73,27 +74,70 @@ function Home() {
   );
 
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:3000");
-    wsRef.current = ws;
-
-    ws.addEventListener("message", (ev) => {
-      try {
-        const data = JSON.parse(ev.data as string);
-        if (data && data.type === "new-discussion" && data.payload) {
-          insertDiscussion(data.payload as Discussion);
-        }
-      } catch (err) {
-        console.error("Invalid WS message", err);
-      }
+    // Listen for new discussions from other users
+    socket.on("receive_discussion", (discussionData: Discussion) => {
+      console.log("Received new discussion:", discussionData);
+      insertDiscussion(discussionData);
     });
 
-    ws.addEventListener("close", () => {
-      console.log("WS disconnected");
-      wsRef.current = null;
+    // Listen for agent responses - Enhanced handling
+    socket.on("receive_message", (messageData: any) => {
+      console.log("Received agent message:", messageData);
+
+      // Remove any existing thinking indicators first
+      // This would require a removeDiscussion function in your context
+      // For now, we'll just add the real response
+
+      // Create a discussion-like object for agent responses
+      const agentDiscussion: Discussion = {
+        id: `agent_${Date.now()}`,
+        content:
+          messageData.message || messageData.text || messageData.response,
+        author: messageData.author || "AI Agent",
+        authorId: messageData.authorId || "ai_agent_002",
+        createdAt: messageData.timestamp || new Date().toISOString(),
+        tags: ["ai-response", "agent", ...(messageData.tags || [])],
+        upvotes: 0,
+        replies: [],
+        views: 0,
+        aiAssist: true,
+      };
+
+      // Insert the agent response as a new discussion
+      insertDiscussion(agentDiscussion);
+    });
+
+    // Listen for agent thinking indicator
+    socket.on("agent_thinking", () => {
+      console.log("Agent is processing...");
+
+      // Show a temporary "thinking" message
+      const thinkingDiscussion: Discussion = {
+        id: `thinking_${Date.now()}`,
+        content: "🤖 Agent is analyzing your question...",
+        author: "AI Agent",
+        authorId: "ai_agent_002",
+        createdAt: new Date().toISOString(),
+        tags: ["ai-thinking"],
+        upvotes: 0,
+        replies: [],
+        views: 0,
+        aiAssist: true,
+      };
+
+      // Insert thinking indicator
+      insertDiscussion(thinkingDiscussion);
+    });
+
+    socket.on("disconnect", () => {
+      console.log("Socket disconnected");
     });
 
     return () => {
-      ws.close();
+      socket.off("receive_discussion");
+      socket.off("receive_message");
+      socket.off("agent_thinking");
+      socket.off("disconnect");
     };
   }, [insertDiscussion]);
 
@@ -213,19 +257,6 @@ function Home() {
         <div className="absolute top-1/3 -left-8 w-96 h-96 bg-blue-300 dark:bg-blue-600 rounded-full opacity-5 blur-3xl animate-pulse delay-1000"></div>
         <div className="absolute bottom-10 right-1/3 w-80 h-80 bg-purple-300 dark:bg-purple-600 rounded-full opacity-5 blur-3xl animate-pulse delay-2000"></div>
       </div>
-
-      {/* Hover timestamp indicator */}
-      {/* {hoverTimestamp && (
-        <div
-          className="fixed z-50 px-4 py-2.5 text-xs rounded-xl bg-slate-900/90 dark:bg-slate-100/90 text-white dark:text-slate-900 pointer-events-none shadow-2xl backdrop-blur-sm border border-cyan-500/30"
-          style={{ left: hoverPosition.x + 15, top: hoverPosition.y - 15 }}
-        >
-          <div className="flex items-center">
-            <Calendar className="w-3.5 h-3.5 mr-2" />
-            {hoverTimestamp}
-          </div>
-        </div>
-      )} */}
 
       {/* Futuristic Navigation */}
       <nav className="relative bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200/50 dark:border-slate-700/50 shadow-xl">
@@ -407,6 +438,10 @@ function Home() {
                     <TrendingUp className="w-4 h-4 mr-1.5" />
                     342 replies
                   </div>
+                  <div className="flex items-center">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full mr-1.5 animate-pulse"></div>
+                    AI Agent Active
+                  </div>
                 </div>
               </div>
 
@@ -438,15 +473,11 @@ function Home() {
                 <CreateDiscussion
                   currentUser={user}
                   onClose={() => setShowCreateDiscussion(false)}
+                  // Replace the onCreated handler around lines 423-483
                   onCreated={async (payload) => {
-                    const tags = (payload.topic || "")
-                      .replace(/[^a-zA-Z0-9\s]/g, " ")
-                      .toLowerCase()
-                      .split(/\s+/)
-                      .filter(Boolean)
-                      .slice(0, 3)
-                      .map((t) => `#${t}`);
+                    console.log("Creating discussion with payload:", payload);
 
+                    // Handle media upload
                     let mediaIpfs: string | undefined;
                     try {
                       if (payload.mediaFile) {
@@ -458,8 +489,7 @@ function Home() {
                             typeof jr === "string"
                               ? jr
                               : (jr as unknown as PinataResp)?.IpfsHash ||
-                                (jr as unknown as PinataResp)?.ipfsHash ||
-                                (jr as unknown as PinataResp)?.IpfsHash;
+                                (jr as unknown as PinataResp)?.ipfsHash;
                           if (maybeHash) mediaIpfs = maybeHash;
                         } catch (e) {
                           console.warn("uploadFileToPinata failed", e);
@@ -469,12 +499,13 @@ function Home() {
                       console.error("Media upload failed", err);
                     }
 
+                    // Create discussion object with all data including tags
                     const discussion: Discussion = {
                       id: Date.now().toString(),
-                      title: payload.topic,
                       content: payload.body,
-                      tags: tags.map((t) => (t.startsWith("#") ? t : `#${t}`)),
+                      tags: payload.tags || [], // AI-generated tags from CreateDiscussion
                       author: user?.username || "anonymous",
+                      authorId: user?.id || "anonymous",
                       createdAt: new Date().toISOString(),
                       media: mediaIpfs ? `ipfs://${mediaIpfs}` : undefined,
                       link: payload.link || undefined,
@@ -484,35 +515,66 @@ function Home() {
                       views: 0,
                     } as Discussion;
 
+                    // Enhanced IPFS metadata upload with tags included
                     try {
-                      const jr = await uploadMetadataToIPFS(
-                        JSON.parse(JSON.stringify(discussion))
-                      );
+                      // Create comprehensive metadata object
+                      const metadata = {
+                        id: discussion.id,
+                        content: discussion.content,
+                        tags: discussion.tags, // Ensure tags are included in IPFS
+                        author: discussion.author,
+                        authorId: discussion.authorId,
+                        createdAt: discussion.createdAt,
+                        media: discussion.media,
+                        link: discussion.link,
+                        aiAssist: discussion.aiAssist,
+                        upvotes: discussion.upvotes,
+                        views: discussion.views,
+                        // Additional metadata for IPFS
+                        type: "discussion",
+                        version: "1.0",
+                        platform: "ABYA Forum",
+                      };
+
+                      console.log("Uploading metadata to IPFS:", metadata);
+
+                      const jr = await uploadMetadataToIPFS(metadata);
                       const maybeMetaHash =
                         typeof jr === "string"
                           ? jr
                           : (jr as unknown as PinataResp)?.IpfsHash ||
-                            (jr as unknown as PinataResp)?.ipfsHash ||
-                            (jr as unknown as PinataResp)?.IpfsHash;
+                            (jr as unknown as PinataResp)?.ipfsHash;
+
                       if (maybeMetaHash) {
                         const d = discussion as WithMeta;
                         d.metadataIpfs = `ipfs://${maybeMetaHash}`;
+                        console.log(
+                          "Successfully uploaded to IPFS:",
+                          d.metadataIpfs
+                        );
                       }
                     } catch (err) {
                       console.error("uploadMetadataToIPFS failed", err);
+                      // Continue execution even if IPFS upload fails
                     }
 
+                    // Emit to socket using the new event name
                     try {
-                      wsRef.current?.send(
-                        JSON.stringify({
-                          type: "new-discussion",
-                          payload: discussion,
-                        })
-                      );
+                      console.log("Emitting new discussion:", {
+                        content: discussion.content.substring(0, 50) + "...",
+                        tags: discussion.tags,
+                        hasAgentMention: /@agent\b/i.test(discussion.content),
+                      });
+
+                      socket.emit("new_discussion", {
+                        ...discussion,
+                        isReply: false, // This is a new discussion, not a reply
+                      });
                     } catch (err) {
-                      console.error("WS send failed", err);
+                      console.error("Socket emit failed", err);
                     }
 
+                    // Also add to local state
                     try {
                       await addDiscussion(
                         discussion as Omit<Discussion, "id" | "createdAt">
@@ -524,6 +586,7 @@ function Home() {
                       );
                       insertDiscussion(discussion);
                     }
+
                     setShowCreateDiscussion(false);
                   }}
                 />
@@ -585,7 +648,7 @@ function Home() {
           {/* Collapsible Sidebar */}
           <div className="flex h-full items-start">
             {/* Vertical Timeline - Positioned relative to sidebar */}
-            <div className="relative mr-4">
+            <div className="relative mr-4 mt-2">
               <div
                 className="relative w-6 cursor-pointer"
                 ref={timelineRef}
@@ -633,7 +696,7 @@ function Home() {
                     <div
                       className="w-3 bg-cyan-500 dark:bg-cyan-400 rounded-full hover:cursor-ns-resize"
                       style={{
-                        height: `${Math.max(8, 500 / discussions.length)}px`,
+                        height: `${Math.max(5, 200 / discussions.length)}px`,
                       }}
                     ></div>
 
@@ -1009,23 +1072,6 @@ function Home() {
                 </div>
               </div>
             </div>
-
-            {/* Floating Tooltip */}
-            {/* {hoverTimestamp && (
-              <div
-                className="fixed bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs font-medium px-3 py-2 rounded-lg shadow-xl pointer-events-none z-50 border border-slate-700 dark:border-slate-300"
-                style={{
-                  left: hoverPosition.x,
-                  top: hoverPosition.y,
-                  transform: "translateY(-50%)",
-                }}
-              >
-                <div className="font-semibold">📅 {hoverTimestamp}</div>
-                <div className="text-xs opacity-80 mt-1">
-                  Click to jump to post
-                </div>
-              </div>
-            )} */}
           </div>
         </div>
       </main>

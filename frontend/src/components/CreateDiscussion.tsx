@@ -1,9 +1,8 @@
 import React, { useState } from "react";
-import { analyzeForTags } from "../services/gemini";
+import { generateTagsFromBackend } from "../services/gemini";
 
 interface CreateDiscussionProps {
   onCreated?: (payload: {
-    topic: string;
     body: string;
     mediaFile?: File | null;
     link?: string;
@@ -19,35 +18,54 @@ const CreateDiscussion: React.FC<CreateDiscussionProps> = ({
   onClose,
   currentUser = { id: "0", username: "You", avatar: undefined },
 }) => {
-  const [topic, setTopic] = useState("");
   const [body, setBody] = useState("");
   const [media, setMedia] = useState<File | null>(null);
   const [link, setLink] = useState("");
   const [aiAssist, setAiAssist] = useState(false);
-  const [suggestedTags, setSuggestedTags] = useState<string[]>([]);
-  const [acceptedTags, setAcceptedTags] = useState<string[]>([]);
+  const [isPosting, setIsPosting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!topic.trim() || !body.trim()) return;
+    if (!body.trim()) return;
 
-    // Emit raw payload to parent so the parent can upload media/metadata
-    onCreated?.({
-      topic: topic.trim(),
-      body: body.trim(),
-      mediaFile: media || undefined,
-      link: link || undefined,
-      tags: acceptedTags.length ? acceptedTags : undefined,
-      aiAssist,
-    });
+    setIsPosting(true);
+    let generatedTags: string[] = [];
 
-    // reset form locally
-    setTopic("");
-    setBody("");
-    setMedia(null);
-    setLink("");
-    setAiAssist(false);
-    onClose?.();
+    try {
+      // Generate tags if AI Assist is enabled
+      if (aiAssist && body.trim()) {
+        try {
+          generatedTags = await generateTagsFromBackend(
+            body.trim(),
+            currentUser?.id,
+            currentUser?.username
+          );
+        } catch (error) {
+          console.error("Failed to generate tags:", error);
+          // Continue with posting even if tag generation fails
+        }
+      }
+
+      // Emit payload with generated tags
+      onCreated?.({
+        body: body.trim(),
+        mediaFile: media || undefined,
+        link: link || undefined,
+        tags: generatedTags.length ? generatedTags : undefined,
+        aiAssist,
+      });
+
+      // Reset form locally
+      setBody("");
+      setMedia(null);
+      setLink("");
+      setAiAssist(false);
+      onClose?.();
+    } catch (error) {
+      console.error("Failed to post discussion:", error);
+    } finally {
+      setIsPosting(false);
+    }
   };
 
   return (
@@ -69,16 +87,6 @@ const CreateDiscussion: React.FC<CreateDiscussionProps> = ({
         </div>
         <div className="flex-1">
           <label className="block text-sm text-cyan-900 dark:text-cyan-100 font-semibold mb-1">
-            Discussion topic
-          </label>
-          <input
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder="What is your discussion about?"
-            className="w-full rounded-md border border-cyan-300 dark:border-cyan-700 p-2 bg-cyan-50 dark:bg-cyan-950 text-cyan-900 dark:text-cyan-100 mb-2"
-          />
-
-          <label className="block text-sm text-cyan-900 dark:text-cyan-100 font-semibold mb-1">
             Discussion
           </label>
           <textarea
@@ -89,47 +97,18 @@ const CreateDiscussion: React.FC<CreateDiscussionProps> = ({
             className="w-full rounded-md border border-cyan-300 dark:border-cyan-700 p-2 bg-cyan-50 dark:bg-cyan-950 text-cyan-900 dark:text-cyan-100"
           />
 
+          {/* AI Assist status indicator */}
+          {aiAssist && (
+            <div className="mt-2">
+              <p className="text-xs text-yellow-600 dark:text-yellow-400 flex items-center">
+                <span className="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
+                AI will generate tags when you post
+              </p>
+            </div>
+          )}
+
           <div className="mt-3 flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm">
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const tags = await analyzeForTags(`${topic}\n\n${body}`);
-                    setSuggestedTags(
-                      tags.map((t) => (t.startsWith("#") ? t : `#${t}`))
-                    );
-                    setAcceptedTags([]);
-                  } catch (e) {
-                    console.warn("Tag suggestion failed", e);
-                  }
-                }}
-                className="px-2 py-1 bg-cyan-200 dark:bg-cyan-800 rounded text-sm"
-              >
-                Suggest tags
-              </button>
-              {suggestedTags.length > 0 && (
-                <div className="flex items-center gap-2">
-                  {suggestedTags.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() =>
-                        setAcceptedTags((s) =>
-                          s.includes(t) ? s.filter((x) => x !== t) : [...s, t]
-                        )
-                      }
-                      className={`px-2 py-1 rounded text-sm ${
-                        acceptedTags.includes(t)
-                          ? "bg-yellow-400 text-black"
-                          : "bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100"
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              )}
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="file"
@@ -166,14 +145,23 @@ const CreateDiscussion: React.FC<CreateDiscussionProps> = ({
                 type="button"
                 onClick={onClose}
                 className="px-3 py-1 rounded bg-cyan-600/30 hover:bg-cyan-700/40 text-cyan-100"
+                disabled={isPosting}
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-3 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white font-semibold"
+                disabled={!body.trim() || isPosting}
+                className="px-3 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
               >
-                Post
+                {isPosting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                    {aiAssist ? "Generating & Posting..." : "Posting..."}
+                  </>
+                ) : (
+                  "Post"
+                )}
               </button>
             </div>
           </div>

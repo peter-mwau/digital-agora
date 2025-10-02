@@ -16,20 +16,25 @@ export interface Tag {
   name: string;
 }
 
+export interface Reply {
+  id: string;
+  content: string;
+}
+
 export interface Discussion {
   id: string;
-  title: string;
   content: string;
-  tags: Tag[] | string[];
-  participants?: User[];
-  createdAt: string | number;
-  // optional fields used for local posts
+  title?: string;
+  author: string;
+  authorId: string; // Add this if missing
+  createdAt: string;
+  tags: string[];
+  upvotes: number;
+  replies: Reply[];
+  views: number;
   media?: string;
   link?: string;
   aiAssist?: boolean;
-  metadataIpfs?: string;
-  // author can be a simple string or a richer object
-  author?: string | { name?: string; address?: string };
 }
 
 export interface User {
